@@ -101,6 +101,7 @@ namespace CSOAA_AND_WAP_LDF {
     size_t read_example_this_loop;
     bool need_to_clear;
     bool is_wap;
+    bool is_fear;
     bool first_pass;
     bool treat_as_classifier;
     bool is_singleline;
@@ -442,6 +443,61 @@ namespace LabelDict {
     }
   }
 
+  void do_actual_learning_fear(vw& all, ldf& data, learner& base, size_t start_K, size_t predicted_K)
+  {
+    data.csoaa_example_t += 1.;
+
+    // find hope, i.e. label with the best (i.e. lowest) cost
+    // and if there are more such labels, then the one with best (i.e. lowest) score
+    size_t K = data.ec_seq.size();
+    size_t hope_K = start_K;
+    float  hope_score = FLT_MAX;
+    float  min_cost = data.ec_seq[predicted_K]->l.cs.costs[0].x;
+    for (size_t k=start_K; k<K; k++) {
+      float ec_cost  = data.ec_seq[k]->l.cs.costs[0].x;
+      float ec_score = data.ec_seq[k]->partial_prediction;
+      if (ec_cost < min_cost || (ec_cost == min_cost && ec_score < hope_score)) {
+        hope_K = k;
+        min_cost = ec_cost;
+        hope_score = ec_score;
+      }
+    }
+    
+    // If we predicted the hope, we are finished (Crammer&Singer call this passive/conservative learning).
+    // Also, don't update if cost_diff = |cost(fear) - cost(hope)| is too small.
+    if (hope_K == predicted_K) return;
+    example *hope = data.ec_seq[hope_K];
+    example *fear = data.ec_seq[predicted_K];
+    float cost_diff = fear->l.cs.costs[0].x - min_cost;
+    if (cost_diff < 1e-6) return;
+    
+    // TODO sometimes use fear-hope => possitive, sometimes hope-fear => negative,
+    // so the number of positive and negative examples for the base learner is balanced.
+    
+    // save original variables
+    float save_example_t = fear->example_t;
+    fear->example_t = data.csoaa_example_t;
+    COST_SENSITIVE::label  save_cs = fear->l.cs;
+    
+    // build example for the base learner
+    label_data& simple_label = fear->l.simple;
+    simple_label.initial = 0.;
+    simple_label.label = 1.;
+    simple_label.weight = cost_diff;
+    fear->partial_prediction = 0.;
+    //fear->l.simple = simple_label;
+    
+    // learn
+    subtract_example(all, fear, hope);
+    base.learn(*fear);
+    unsubtract_example(all, fear);
+    
+    // restore original cost-sensitive label, sum of importance weights and partial_prediction
+    fear->l.cs = save_cs;
+    fear->example_t = save_example_t;
+    fear->partial_prediction = save_cs.costs[0].partial_prediction;
+  }
+
   template <bool is_learn>
   void do_actual_learning(vw& all, ldf& data, learner& base)
   {
@@ -490,8 +546,9 @@ namespace LabelDict {
 
     /////////////////////// learn
     if (is_learn && !isTest){
-      if (data.is_wap) do_actual_learning_wap(all, data, base, start_K);
-      else             do_actual_learning_oaa(all, data, base, start_K);
+      if (data.is_wap)       do_actual_learning_wap(all, data, base, start_K);
+      else if (data.is_fear) do_actual_learning_fear(all, data, base, start_K, predicted_K);
+      else                   do_actual_learning_oaa(all, data, base, start_K);
     }
 
     // Mark the predicted subexample with its class_index, all other with 0
@@ -671,12 +728,20 @@ namespace LabelDict {
       all.file_options.append(" --csoaa_ldf ");
       all.file_options.append(ldf_arg);
     }
-    else {
+    else if (vm.count("wap_ldf")){
       ldf_arg = vm["wap_ldf"].as<string>();
       ld->is_wap = true;
       all.file_options.append(" --wap_ldf ");
       all.file_options.append(ldf_arg);
     }
+    else if (vm.count("fear_ldf")){
+      ldf_arg = "multiline";
+      ld->is_fear = true;
+      all.file_options.append(" --fear_ldf ");
+    } else {
+      assert(false);
+    }
+
     if ( vm.count("ldf_override") )
       ldf_arg = vm["ldf_override"].as<string>();
 

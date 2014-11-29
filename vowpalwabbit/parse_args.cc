@@ -838,6 +838,7 @@ void parse_score_users(vw& all, po::variables_map& vm, bool& got_cs)
     ("csoaa", po::value<size_t>(), "Use one-against-all multiclass learning with <k> costs")
     ("csoaa_ldf", po::value<string>(), "Use one-against-all multiclass learning with label dependent features.  Specify singleline or multiline.")
     ("wap_ldf", po::value<string>(), "Use weighted all-pairs multiclass learning with label dependent features.  Specify singleline or multiline.")
+    ("fear_ldf", "Use hope-fear multiclass learning with label dependent features.")
     ;
 
   vm = add_options(all, multiclass_opt);
@@ -865,13 +866,7 @@ void parse_score_users(vw& all, po::variables_map& vm, bool& got_cs)
     all.l = exclusive_setup(all, vm, score_consumer, LOG_MULTI::setup);
   }
   
-  if(vm.count("csoaa_ldf") || vm.count("csoaa_ldf")) {
-    all.l = exclusive_setup(all, vm, score_consumer, CSOAA_AND_WAP_LDF::setup);
-    all.cost_sensitive = all.l;
-    got_cs = true;
-  }
-  
-  if(vm.count("wap_ldf") || vm.count("wap_ldf") ) {
+  if(vm.count("csoaa_ldf") || vm.count("wap_ldf") || vm.count("fear_ldf")) {
     all.l = exclusive_setup(all, vm, score_consumer, CSOAA_AND_WAP_LDF::setup);
     all.cost_sensitive = all.l;
     got_cs = true;
